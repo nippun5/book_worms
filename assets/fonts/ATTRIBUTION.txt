@@ -1,0 +1,5 @@
+Poppins
+Designed by Indian Type Foundry / Jonny Pinhorn.
+Licensed under the SIL Open Font License, Version 1.1.
+Source: https://fonts.google.com/specimen/Poppins
+Full license text: https://openfontlicense.org
