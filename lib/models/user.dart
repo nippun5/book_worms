@@ -56,6 +56,33 @@ class AppUser {
     );
   }
 
+  // Map<String, dynamic> toMap() {
+  //   return {
+  //     'id': id,
+  //     'name': name,
+  //     'email': email,
+  //     'passwordHash': passwordHash,
+  //     'bio': bio,
+  //     'avatarColorValue': avatarColorValue,
+  //     'role': role.name,
+  //     'isBanned': isBanned ? 1 : 0,
+  //     'createdAt': createdAt.toIso8601String(),
+  //   };
+  // }
+
+  // factory AppUser.fromMap(Map<String, dynamic> map) {
+  //   return AppUser(
+  //     id: map['id'] as int?,
+  //     name: map['name'] as String,
+  //     email: map['email'] as String,
+  //     passwordHash: map['passwordHash'] as String,
+  //     bio: map['bio'] as String? ?? '',
+  //     avatarColorValue: map['avatarColorValue'] as int,
+  //     role: userRoleFromString(map['role'] as String),
+  //     isBanned: (map['isBanned'] as int? ?? 0) == 1,
+  //     createdAt: DateTime.parse(map['createdAt'] as String),
+  //   );
+  // }
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -65,21 +92,22 @@ class AppUser {
       'bio': bio,
       'avatarColorValue': avatarColorValue,
       'role': role.name,
-      'isBanned': isBanned ? 1 : 0,
+      'isBanned': isBanned, // Changed from `isBanned ? 1 : 0` to boolean for Spring Boot
       'createdAt': createdAt.toIso8601String(),
     };
   }
 
   factory AppUser.fromMap(Map<String, dynamic> map) {
+    final rawBanned = map['isBanned'] ?? map['banned'];
     return AppUser(
-      id: map['id'] as int?,
+      id: (map['id'] as num?)?.toInt(),
       name: map['name'] as String,
       email: map['email'] as String,
-      passwordHash: map['passwordHash'] as String,
+      passwordHash: map['passwordHash'] as String? ?? '',
       bio: map['bio'] as String? ?? '',
-      avatarColorValue: map['avatarColorValue'] as int,
+      avatarColorValue: (map['avatarColorValue'] as num).toInt(),
       role: userRoleFromString(map['role'] as String),
-      isBanned: (map['isBanned'] as int? ?? 0) == 1,
+      isBanned: rawBanned is bool ? rawBanned : (rawBanned as num? ?? 0) == 1,
       createdAt: DateTime.parse(map['createdAt'] as String),
     );
   }

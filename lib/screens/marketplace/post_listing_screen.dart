@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/app_colors.dart';
 import '../../models/book_listing.dart';
@@ -119,8 +120,9 @@ class _PostListingScreenState extends State<PostListingScreen> {
                 const SizedBox(height: 18),
                 TextField(
                   controller: _priceCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'Price (USD)', prefixText: '\$ '),
+                  keyboardType: TextInputType.number,inputFormatters:[FilteringTextInputFormatter.digitsOnly,],decoration: const InputDecoration(
+                  labelText: 'Price (रु)',
+                  prefixText: 'रु '),
                 ),
               ],
               const SizedBox(height: 20),

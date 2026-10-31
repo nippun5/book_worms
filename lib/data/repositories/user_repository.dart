@@ -1,88 +1,160 @@
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
-import 'package:sqflite/sqflite.dart';
-import '../db_helper.dart';
+import '../api_config.dart';
 import '../../models/user.dart';
 
 class UserRepository {
-  final _dbHelper = DBHelper.instance;
+  String get _base => '${ApiConfig.baseUrl}/users';
+  String get _loginUrl => '${ApiConfig.baseUrl}/auth/login';
+  String get _registerUrl => '${ApiConfig.baseUrl}/auth/register';
 
   String hashPassword(String plain) {
     return sha256.convert(utf8.encode(plain)).toString();
   }
 
+  Future<AppUser?> login({
+    required String email,
+    required String password,
+  }) async {
+    final cleanEmail = email.toLowerCase().trim();
+    final hashedPassword = hashPassword(password);
+
+    final res = await ApiConfig.client.post(
+      Uri.parse(_loginUrl),
+      headers: ApiConfig.headers,
+      body: jsonEncode({
+        'email': cleanEmail,
+        'password': password,
+        'passwordHash': hashedPassword,
+      }),
+    );
+
+    if (res.statusCode == 200 && res.body.isNotEmpty) {
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final userMap = data.containsKey('user') && data['user'] is Map<String, dynamic>
+          ? data['user'] as Map<String, dynamic>
+          : data;
+      return AppUser.fromMap(userMap);
+    }
+    return null;
+  }
+
   Future<AppUser?> findByEmail(String email) async {
-    final db = await _dbHelper.database;
-    final rows = await db.query('users', where: 'email = ?', whereArgs: [email.toLowerCase().trim()]);
-    if (rows.isEmpty) return null;
-    return AppUser.fromMap(rows.first);
+    final cleanEmail = email.toLowerCase().trim();
+    final all = await getAllUsers();
+    for (final u in all) {
+      if (u.email.toLowerCase().trim() == cleanEmail) return u;
+    }
+    return null;
   }
 
   Future<AppUser?> findById(int id) async {
-    final db = await _dbHelper.database;
-    final rows = await db.query('users', where: 'id = ?', whereArgs: [id]);
-    if (rows.isEmpty) return null;
-    return AppUser.fromMap(rows.first);
+    final res = await ApiConfig.client.get(
+      Uri.parse('$_base/$id'),
+      headers: ApiConfig.headers,
+    );
+    if (res.statusCode == 200 && res.body.isNotEmpty) {
+      return AppUser.fromMap(jsonDecode(res.body) as Map<String, dynamic>);
+    }
+    return null;
   }
 
-  /// Registers a new reader account. Returns null if the email is taken.
   Future<AppUser?> register({
     required String name,
     required String email,
     required String password,
     required int avatarColorValue,
   }) async {
-    final existing = await findByEmail(email);
-    if (existing != null) return null;
+    final cleanEmail = email.toLowerCase().trim();
+    final hashedPassword = hashPassword(password);
 
-    final db = await _dbHelper.database;
     final user = AppUser(
       name: name.trim(),
-      email: email.toLowerCase().trim(),
-      passwordHash: hashPassword(password),
+      email: cleanEmail,
+      passwordHash: hashedPassword,
       avatarColorValue: avatarColorValue,
       role: UserRole.reader,
     );
-    final id = await db.insert('users', user.toMap()..remove('id'));
-    return user.copyWith(id: id);
-  }
 
-  /// Returns the user if credentials are valid, otherwise null.
-  Future<AppUser?> login({required String email, required String password}) async {
-    final user = await findByEmail(email);
-    if (user == null) return null;
-    if (user.passwordHash != hashPassword(password)) return null;
-    return user;
+    final payload = user.toMap()
+      ..remove('id')
+      ..['password'] = password; // Included in case the backend hashes raw password
+
+    final res = await ApiConfig.client.post(
+      Uri.parse(_registerUrl),
+      headers: ApiConfig.headers,
+      body: jsonEncode(payload),
+    );
+
+    if ((res.statusCode == 200 || res.statusCode == 201) && res.body.isNotEmpty) {
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final userMap = data.containsKey('user') && data['user'] is Map<String, dynamic>
+          ? data['user'] as Map<String, dynamic>
+          : data;
+      return AppUser.fromMap(userMap);
+    }
+    return null;
   }
 
   Future<List<AppUser>> getAllUsers() async {
-    final db = await _dbHelper.database;
-    final rows = await db.query('users', orderBy: 'createdAt DESC');
-    return rows.map(AppUser.fromMap).toList();
+    final res = await ApiConfig.client.get(
+      Uri.parse(_base),
+      headers: ApiConfig.headers,
+    );
+    if (res.statusCode == 200) {
+      final List<dynamic> list = jsonDecode(res.body);
+      final users = list.map((e) => AppUser.fromMap(e as Map<String, dynamic>)).toList();
+      users.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return users;
+    }
+    return [];
   }
 
   Future<void> setBanned(int userId, bool banned) async {
-    final db = await _dbHelper.database;
-    await db.update('users', {'isBanned': banned ? 1 : 0}, where: 'id = ?', whereArgs: [userId]);
+    final existing = await findById(userId);
+    if (existing == null) return;
+    final updated = existing.copyWith(isBanned: banned);
+    await ApiConfig.client.put(
+      Uri.parse('$_base/$userId'),
+      headers: ApiConfig.headers,
+      body: jsonEncode(updated.toMap()),
+    );
   }
 
   Future<void> setRole(int userId, UserRole role) async {
-    final db = await _dbHelper.database;
-    await db.update('users', {'role': role.name}, where: 'id = ?', whereArgs: [userId]);
+    final existing = await findById(userId);
+    if (existing == null) return;
+    final updated = existing.copyWith(role: role);
+    await ApiConfig.client.put(
+      Uri.parse('$_base/$userId'),
+      headers: ApiConfig.headers,
+      body: jsonEncode(updated.toMap()),
+    );
   }
+Future<AppUser?> updateProfile(int userId, {String? name, String? bio}) async {
+    final payload = <String, dynamic>{
+      if (name != null) 'name': name.trim(),
+      if (bio != null) 'bio': bio.trim(),
+    };
 
-  Future<void> updateProfile(int userId, {String? name, String? bio}) async {
-    final db = await _dbHelper.database;
-    final values = <String, dynamic>{};
-    if (name != null) values['name'] = name;
-    if (bio != null) values['bio'] = bio;
-    if (values.isEmpty) return;
-    await db.update('users', values, where: 'id = ?', whereArgs: [userId]);
+    final res = await ApiConfig.client.patch(
+      Uri.parse('$_base/$userId/profile'),
+      headers: ApiConfig.headers,
+      body: jsonEncode(payload),
+    );
+
+    if (res.statusCode == 200 && res.body.isNotEmpty) {
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final userMap = data.containsKey('user') && data['user'] is Map<String, dynamic>
+          ? data['user'] as Map<String, dynamic>
+          : data;
+      return AppUser.fromMap(userMap);
+    }
+    return null;
   }
 
   Future<int> countUsers() async {
-    final db = await _dbHelper.database;
-    final result = await db.rawQuery('SELECT COUNT(*) as c FROM users');
-    return Sqflite.firstIntValue(result) ?? 0;
+    final users = await getAllUsers();
+    return users.length;
   }
 }

@@ -1,91 +1,126 @@
-import '../db_helper.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import '../api_config.dart';
 import '../../models/review.dart';
 
 class ReviewRepository {
-  final _dbHelper = DBHelper.instance;
+  String get _base => '${ApiConfig.baseUrl}/reviews';
+
+  // Local fallback set in case backend doesn't expose a /likes endpoint
+  static final Map<int, Set<int>> _localLikesCache = {};
 
   Future<Review> addReview(Review review) async {
-    final db = await _dbHelper.database;
-    final id = await db.insert('reviews', review.toMap()..remove('id'));
-    return Review(
-      id: id,
-      bookId: review.bookId,
-      userId: review.userId,
-      rating: review.rating,
-      text: review.text,
-      likeCount: review.likeCount,
-      createdAt: review.createdAt,
+    final payload = review.toMap()..remove('id');
+    final res = await http.post(
+      Uri.parse(_base),
+      headers: ApiConfig.headers,
+      body: jsonEncode(payload),
     );
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      return Review.fromMap(jsonDecode(res.body) as Map<String, dynamic>);
+    }
+    throw Exception('Failed to add review: ${res.statusCode} ${res.body}');
   }
 
   Future<List<Review>> getReviewsForBook(int bookId) async {
-    final db = await _dbHelper.database;
-    final rows = await db.query('reviews', where: 'bookId = ?', whereArgs: [bookId], orderBy: 'createdAt DESC');
-    return rows.map(Review.fromMap).toList();
+    final uri = Uri.parse(_base).replace(queryParameters: {'bookId': '$bookId'});
+    final res = await http.get(uri, headers: ApiConfig.headers);
+    if (res.statusCode == 200) {
+      final List<dynamic> list = jsonDecode(res.body);
+      final reviews = list
+          .map((e) => Review.fromMap(e as Map<String, dynamic>))
+          .where((r) => r.bookId == bookId)
+          .toList();
+      reviews.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return reviews;
+    }
+    return [];
   }
 
-  /// Newest reviews first — powers the "New" feed tab.
   Future<List<Review>> getRecentReviews({int limit = 100}) async {
-    final db = await _dbHelper.database;
-    final rows = await db.query('reviews', orderBy: 'createdAt DESC', limit: limit);
-    return rows.map(Review.fromMap).toList();
+    final all = await getAllReviews();
+    all.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return all.take(limit).toList();
   }
 
-  /// Most-liked first — powers the "Trending" feed tab.
   Future<List<Review>> getTrendingReviews({int limit = 100}) async {
-    final db = await _dbHelper.database;
-    final rows = await db.query('reviews', orderBy: 'likeCount DESC, createdAt DESC', limit: limit);
-    return rows.map(Review.fromMap).toList();
+    final all = await getAllReviews();
+    all.sort((a, b) {
+      final cmp = b.likeCount.compareTo(a.likeCount);
+      return cmp != 0 ? cmp : b.createdAt.compareTo(a.createdAt);
+    });
+    return all.take(limit).toList();
   }
 
   Future<List<Review>> getReviewsByUser(int userId) async {
-    final db = await _dbHelper.database;
-    final rows = await db.query('reviews', where: 'userId = ?', whereArgs: [userId], orderBy: 'createdAt DESC');
-    return rows.map(Review.fromMap).toList();
+    final uri = Uri.parse(_base).replace(queryParameters: {'userId': '$userId'});
+    final res = await http.get(uri, headers: ApiConfig.headers);
+    if (res.statusCode == 200) {
+      final List<dynamic> list = jsonDecode(res.body);
+      final reviews = list
+          .map((e) => Review.fromMap(e as Map<String, dynamic>))
+          .where((r) => r.userId == userId)
+          .toList();
+      reviews.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return reviews;
+    }
+    return [];
   }
 
   Future<List<Review>> getAllReviews() async {
-    final db = await _dbHelper.database;
-    final rows = await db.query('reviews', orderBy: 'createdAt DESC');
-    return rows.map(Review.fromMap).toList();
+    final res = await http.get(Uri.parse(_base), headers: ApiConfig.headers);
+    if (res.statusCode == 200) {
+      final List<dynamic> list = jsonDecode(res.body);
+      final reviews = list.map((e) => Review.fromMap(e as Map<String, dynamic>)).toList();
+      reviews.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return reviews;
+    }
+    return [];
   }
 
-  /// Ids of reviews the given user has liked.
   Future<Set<int>> getLikedReviewIds(int userId) async {
-    final db = await _dbHelper.database;
-    final rows = await db.query('review_likes', columns: ['reviewId'], where: 'userId = ?', whereArgs: [userId]);
-    return rows.map((r) => r['reviewId'] as int).toSet();
+    final uri = Uri.parse('$_base/liked').replace(queryParameters: {'userId': '$userId'});
+    final res = await http.get(uri, headers: ApiConfig.headers);
+    if (res.statusCode == 200) {
+      final List<dynamic> list = jsonDecode(res.body);
+      return list.map((e) => (e as num).toInt()).toSet();
+    }
+    return _localLikesCache[userId] ?? <int>{};
   }
 
-  /// Toggles a like. Returns true if the review is now liked by the user.
   Future<bool> toggleLike(int reviewId, int userId) async {
-    final db = await _dbHelper.database;
-    return db.transaction((txn) async {
-      final existing = await txn.query('review_likes',
-          where: 'reviewId = ? AND userId = ?', whereArgs: [reviewId, userId]);
-      if (existing.isEmpty) {
-        await txn.insert('review_likes', {'reviewId': reviewId, 'userId': userId});
-        await txn.rawUpdate('UPDATE reviews SET likeCount = likeCount + 1 WHERE id = ?', [reviewId]);
-        return true;
-      } else {
-        await txn.delete('review_likes', where: 'reviewId = ? AND userId = ?', whereArgs: [reviewId, userId]);
-        await txn.rawUpdate('UPDATE reviews SET likeCount = MAX(likeCount - 1, 0) WHERE id = ?', [reviewId]);
-        return false;
-      }
-    });
+    final uri = Uri.parse('$_base/$reviewId/like').replace(queryParameters: {'userId': '$userId'});
+    final res = await http.post(
+      uri,
+      headers: ApiConfig.headers,
+      body: jsonEncode({'userId': userId}),
+    );
+    if (res.statusCode == 200 && res.body.isNotEmpty) {
+      final decoded = jsonDecode(res.body);
+      if (decoded is bool) return decoded;
+      if (decoded is Map && decoded.containsKey('liked')) return decoded['liked'] as bool;
+    }
+
+    // Fallback if backend only supports PUT on /api/reviews/{id}
+    final userLikes = _localLikesCache.putIfAbsent(userId, () => <int>{});
+    final isNowLiked = !userLikes.contains(reviewId);
+    if (isNowLiked) {
+      userLikes.add(reviewId);
+    } else {
+      userLikes.remove(reviewId);
+    }
+    return isNowLiked;
   }
 
   Future<void> deleteReview(int reviewId) async {
-    final db = await _dbHelper.database;
-    await db.transaction((txn) async {
-      await txn.delete('review_likes', where: 'reviewId = ?', whereArgs: [reviewId]);
-      await txn.delete('reviews', where: 'id = ?', whereArgs: [reviewId]);
-    });
+    final res = await http.delete(Uri.parse('$_base/$reviewId'), headers: ApiConfig.headers);
+    if (res.statusCode != 200 && res.statusCode != 204) {
+      throw Exception('Failed to delete review: ${res.statusCode}');
+    }
   }
 
   Future<int> countAll() async {
-    final db = await _dbHelper.database;
-    final r = await db.rawQuery('SELECT COUNT(*) AS c FROM reviews');
-    return (r.first['c'] as int?) ?? 0;
+    final all = await getAllReviews();
+    return all.length;
   }
 }

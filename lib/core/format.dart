@@ -12,7 +12,7 @@ String timeAgo(DateTime time) {
 String formatDate(DateTime time) => DateFormat.yMMMd().format(time);
 
 String formatPrice(double value) {
-  if (value == value.roundToDouble()) return '\$${value.toStringAsFixed(0)}';
+  if (value == value.roundToDouble()) return '\रु ${value.toStringAsFixed(0)}';
   return '\$${value.toStringAsFixed(2)}';
 }
 

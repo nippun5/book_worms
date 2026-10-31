@@ -1,65 +1,69 @@
-import '../db_helper.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import '../api_config.dart';
 import '../../models/book.dart';
 
 class BookRepository {
-  final _dbHelper = DBHelper.instance;
+  String get _base => '${ApiConfig.baseUrl}/books';
 
   Future<Book> addBook(Book book) async {
-    final db = await _dbHelper.database;
-    final id = await db.insert('books', book.toMap()..remove('id'));
-    return Book(
-      id: id,
-      title: book.title,
-      author: book.author,
-      genre: book.genre,
-      description: book.description,
-      coverColorValue: book.coverColorValue,
-      addedByUserId: book.addedByUserId,
-      createdAt: book.createdAt,
+    final payload = book.toMap()..remove('id');
+    final res = await http.post(
+      Uri.parse(_base),
+      headers: ApiConfig.headers,
+      body: jsonEncode(payload),
     );
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      return Book.fromMap(jsonDecode(res.body) as Map<String, dynamic>);
+    }
+    throw Exception('Failed to add book: ${res.statusCode}${res.body}');
   }
 
   Future<Book?> findById(int id) async {
-    final db = await _dbHelper.database;
-    final rows = await db.query('books', where: 'id = ?', whereArgs: [id]);
-    if (rows.isEmpty) return null;
-    return Book.fromMap(rows.first);
+    final res = await http.get(Uri.parse('$_base/$id'), headers: ApiConfig.headers);
+    if (res.statusCode == 200 && res.body.isNotEmpty) {
+      return Book.fromMap(jsonDecode(res.body) as Map<String, dynamic>);
+    }
+    return null;
   }
 
   Future<List<Book>> getAllBooks() async {
-    final db = await _dbHelper.database;
-    final rows = await db.query('books', orderBy: 'title COLLATE NOCASE ASC');
-    return rows.map(Book.fromMap).toList();
+    final res = await http.get(Uri.parse(_base), headers: ApiConfig.headers);
+    if (res.statusCode == 200) {
+      final List<dynamic> list = jsonDecode(res.body);
+      final books = list.map((e) => Book.fromMap(e as Map<String, dynamic>)).toList();
+      books.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+      return books;
+    }
+    throw Exception('Failed to load books: ${res.statusCode}');
   }
 
   Future<List<Book>> search(String query) async {
-    final db = await _dbHelper.database;
-    final rows = await db.query(
-      'books',
-      where: 'title LIKE ? OR author LIKE ?',
-      whereArgs: ['%$query%', '%$query%'],
-      orderBy: 'title COLLATE NOCASE ASC',
-    );
-    return rows.map(Book.fromMap).toList();
+    // Try server-side search param first; also filter client-side to guarantee accuracy
+    final uri = Uri.parse(_base).replace(queryParameters: {'q': query, 'query': query});
+    final res = await http.get(uri, headers: ApiConfig.headers);
+    if (res.statusCode == 200) {
+      final List<dynamic> list = jsonDecode(res.body);
+      final q = query.toLowerCase();
+      final books = list
+          .map((e) => Book.fromMap(e as Map<String, dynamic>))
+          .where((b) => b.title.toLowerCase().contains(q) || b.author.toLowerCase().contains(q))
+          .toList();
+      books.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+      return books;
+    }
+    return [];
   }
 
   Future<int> countAll() async {
-    final db = await _dbHelper.database;
-    final r = await db.rawQuery('SELECT COUNT(*) AS c FROM books');
-    return (r.first['c'] as int?) ?? 0;
+    final books = await getAllBooks();
+    return books.length;
   }
 
-  /// Admin action: removes a book and everything attached to it
-  /// (reviews, likes, listings, loans).
   Future<void> deleteBookCascade(int bookId) async {
-    final db = await _dbHelper.database;
-    await db.transaction((txn) async {
-      await txn.rawDelete(
-          'DELETE FROM review_likes WHERE reviewId IN (SELECT id FROM reviews WHERE bookId = ?)', [bookId]);
-      await txn.delete('reviews', where: 'bookId = ?', whereArgs: [bookId]);
-      await txn.delete('loans', where: 'bookId = ?', whereArgs: [bookId]);
-      await txn.delete('listings', where: 'bookId = ?', whereArgs: [bookId]);
-      await txn.delete('books', where: 'id = ?', whereArgs: [bookId]);
-    });
+    final res = await http.delete(Uri.parse('$_base/$bookId'), headers: ApiConfig.headers);
+    if (res.statusCode != 200 && res.statusCode != 204) {
+      throw Exception('Failed to delete book: ${res.statusCode}');
+    }
   }
 }
