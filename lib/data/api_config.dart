@@ -7,9 +7,11 @@ class ApiConfig {
   static final http.Client client = LoggingHttpClient(http.Client());
 
   static String get baseUrl {
-    if (kIsWeb) return 'http://localhost:8080/api';
-    if (Platform.isAndroid) return 'http://10.0.2.2:8080/api';
-    return 'http://localhost:8080/api'; // iOS Simulator / macOS
+    // if (kIsWeb) return 'http://localhost:8080/api';
+    // if (Platform.isAndroid) return 'http://10.0.2.2:8080/api';
+    // return 'http://localhost:8080/api'; // iOS Simulator / macOS
+
+    return 'https://book-worms-backend.onrender.com/api';
   }
 
   static const Map<String, String> headers = {
