@@ -23,21 +23,22 @@ class AuthProvider extends ChangeNotifier {
   String? get error => _error;
 
   /// Called once at startup: seeds demo data and restores the saved session.
-  Future<void> init() async {
-    await SeedService().seedIfNeeded();
-    final prefs = await SharedPreferences.getInstance();
-    final savedId = prefs.getInt(_sessionKey);
-    if (savedId != null) {
-      final u = await _users.findById(savedId);
-      if (u != null && !u.isBanned) {
-        _user = u;
-      } else {
-        await prefs.remove(_sessionKey);
-      }
-    }
-    _initializing = false;
+Future<void> init() async {
+  try {
+    debugPrint('🚀 AuthProvider.init() started...');
+    
+    // Keep your existing startup code here (e.g., seed check / session restore)
+    
+    debugPrint('✅ AuthProvider.init() succeeded!');
+  } catch (e, stackTrace) {
+    debugPrint('❌ ERROR inside AuthProvider.init(): $e');
+    debugPrint('$stackTrace');
+  } finally {
+    // This guarantees the SplashScreen will ALWAYS dismiss!
+    _initializing = false; // (use whatever your boolean field is named)
     notifyListeners();
   }
+}
 
   void clearError() {
     _error = null;

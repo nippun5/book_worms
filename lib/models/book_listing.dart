@@ -68,7 +68,7 @@ class BookListing {
       'id': id,
       'bookId': bookId,
       'ownerUserId': ownerUserId,
-      'type': type.name,
+      'type': type.name.toUpperCase(),
       'price': price,
       'condition': condition.name,
       'status': status.name,
@@ -82,7 +82,8 @@ class BookListing {
       id: map['id'] as int?,
       bookId: map['bookId'] as int,
       ownerUserId: map['ownerUserId'] as int,
-      type: listingTypeFromString(map['type'] as String),
+      type: ListingType.values.firstWhere(
+  (e) => e.name.toUpperCase() == (map['type'] as String).toUpperCase()),
       price: (map['price'] as num?)?.toDouble(),
       condition: listingConditionFromString(map['condition'] as String),
       status: listingStatusFromString(map['status'] as String),
